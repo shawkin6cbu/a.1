@@ -1,0 +1,2 @@
+PyQt6
+# Add other dependencies here, e.g., for PDF processing

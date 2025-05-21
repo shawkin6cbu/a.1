@@ -1,0 +1,25 @@
+# Python standard
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+.env
+.venv
+venv/
+
+# Application specific
+Logs/*.log
+Input_PDFs/*
+!Input_PDFs/.gitkeep
+Output_Labels/*
+!Output_Labels/.gitkeep
+Output_SetupDocs/*
+!Output_SetupDocs/.gitkeep
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
