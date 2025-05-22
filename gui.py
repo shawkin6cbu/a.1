@@ -11,6 +11,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QDir, QTimer, QDateTime, QAbstractItemModel
 from PyQt6.QtGui import QAction, QPalette, QColor
 
+from ui_components import PDFListWidget # Added import
+
 # Optional: Set a modern style
 try:
     from PyQt6.QtSvgWidgets import QSvgWidget
@@ -345,94 +347,10 @@ modern_stylesheet = r"""
 
 
 # ==============================================================================
-# SECTION 2: CLASS DEFINITIONS (e.g., PDFListWidget, ContractProcessorApp)
+# SECTION 2: CLASS DEFINITIONS (e.g., ContractProcessorApp)
 # ==============================================================================
 
-
-class PDFListWidget(QListWidget):
-    files_added = pyqtSignal(list)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAcceptDrops(True)
-        self.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
-        # REMOVED inline stylesheet - let global QSS handle it
-        # self.setStyleSheet("""...""")
-
-    # Ensure this method is correctly indented as part of the class
-    def _replace_current_pdf(self, new_file_path):
-        """Helper to clear and add the new PDF."""
-        self.clear()
-        self.addItem(new_file_path)
-        self.files_added.emit([new_file_path])
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            # Check if any of the URLs are PDF files
-            # We only need to know if *at least one* is a PDF to accept the enter
-            is_pdf_present = any(url.toLocalFile().lower().endswith('.pdf')
-                                 for url in event.mimeData().urls())
-            if is_pdf_present:
-                event.acceptProposedAction()
-            else:
-                event.ignore()
-        else:
-            event.ignore()
-
-    def dragMoveEvent(self, event):
-        # If dragEnterEvent accepted, dragMove can usually just accept too.
-        # More specific checks can be done if needed (e.g., based on mouse position over sub-elements)
-        if event.mimeData().hasUrls(): # Basic check is good
-            event.acceptProposedAction()
-        else:
-            event.ignore()
-
-    def dropEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.setDropAction(Qt.DropAction.CopyAction) # Set the action
-            event.acceptProposedAction() # Explicitly accept
-
-            new_pdf_path = None
-            # Find the first valid PDF path from the dropped URLs
-            for url in event.mimeData().urls():
-                file_path = url.toLocalFile()
-                if file_path.lower().endswith('.pdf'):
-                    new_pdf_path = file_path
-                    break # We only care about the first PDF for swapping
-
-            if new_pdf_path:
-                self._replace_current_pdf(new_pdf_path) # Use the helper
-            # If no valid PDF was dropped, we do nothing, the event was accepted but no action taken on list
-        # If mimeData doesn't have URLs, the event is implicitly ignored by not being handled.
-
-    def mousePressEvent(self, event):
-        super().mousePressEvent(event)
-
-    def add_pdfs_dialog(self):
-        # No need to ask for confirmation here if the behavior is always to replace
-        # The user is explicitly choosing a new file.
-
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select PDF File",
-            QDir.homePath(),
-            "PDF Files (*.pdf);;All Files (*)"
-        )
-
-        if file_path: # If a file was selected
-            self._replace_current_pdf(file_path) # Use the helper
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select PDF File",
-            QDir.homePath(),
-            "PDF Files (*.pdf);;All Files (*)"
-        )
-
-        if file_path: # If a file was selected
-            self._replace_current_pdf(file_path)
-
-
-
+# PDFListWidget class has been moved to ui_components.py
 
 class ContractProcessorApp(QMainWindow):
     
@@ -526,18 +444,47 @@ class ContractProcessorApp(QMainWindow):
         form_layout.addRow(QLabel("Contract Type:"), self.contract_type_combo)
         layout.addLayout(form_layout)
 
+        # Create a new QTabWidget for sub-controls
+        controls_tab_widget = QTabWidget()
+
+        # --- Desired Outputs Tab ---
+        output_options_tab = QWidget()
+        output_options_tab_layout = QVBoxLayout(output_options_tab)
+        
         self.output_options_group = QGroupBox("Desired Outputs")
-        output_options_layout = QVBoxLayout()
+        output_options_group_layout = QVBoxLayout() # Renamed from output_options_layout
 
         self.chk_generate_file_label = QCheckBox("Generate File Label")
         self.chk_generate_setup_docs = QCheckBox("Generate Setup Documents")
         self.chk_generate_file_label.setChecked(True)
         self.chk_generate_setup_docs.setChecked(True)
 
-        output_options_layout.addWidget(self.chk_generate_file_label)
-        output_options_layout.addWidget(self.chk_generate_setup_docs)
-        self.output_options_group.setLayout(output_options_layout)
-        layout.addWidget(self.output_options_group)
+        output_options_group_layout.addWidget(self.chk_generate_file_label)
+        output_options_group_layout.addWidget(self.chk_generate_setup_docs)
+        self.output_options_group.setLayout(output_options_group_layout)
+        output_options_tab_layout.addWidget(self.output_options_group)
+        controls_tab_widget.addTab(output_options_tab, "Desired Outputs")
+
+        # --- Buyer/Seller Tab ---
+        buyer_seller_tab = QWidget()
+        buyer_seller_tab_layout = QVBoxLayout() # Create layout for the tab
+
+        # Participant Type GroupBox
+        participant_type_group = QGroupBox("Participant Type")
+        participant_type_layout = QVBoxLayout()
+        self.chk_buyer = QCheckBox("Buyer")
+        self.chk_seller = QCheckBox("Seller")
+        participant_type_layout.addWidget(self.chk_buyer)
+        participant_type_layout.addWidget(self.chk_seller)
+        participant_type_group.setLayout(participant_type_layout)
+        
+        buyer_seller_tab_layout.addWidget(participant_type_group)
+        buyer_seller_tab_layout.addStretch(1) # Add stretch to push groupbox to the top
+        buyer_seller_tab.setLayout(buyer_seller_tab_layout) # Set the layout for the tab
+
+        controls_tab_widget.addTab(buyer_seller_tab, "Buyer/Seller")
+
+        layout.addWidget(controls_tab_widget) # Add the new tab widget to the main layout
 
         # === MODIFIED PDF Input Section ===
         pdf_input_group = QGroupBox("PDF Input")
