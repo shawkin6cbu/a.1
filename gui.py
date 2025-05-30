@@ -6,10 +6,17 @@ from PyQt6.QtWidgets import (
     QTabWidget, QComboBox, QGroupBox, QCheckBox, QLabel, QListWidget,
     QPushButton, QLineEdit, QTableWidget, QTableWidgetItem, QTextEdit,
     QStatusBar, QProgressBar, QFileDialog, QMessageBox, QSizePolicy,
-    QSpacerItem, QCompleter
+    QSpacerItem, QCompleter, QInputDialog, QListView
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QDir, QTimer, QDateTime, QAbstractItemModel
 from PyQt6.QtGui import QAction, QPalette, QColor
+
+# --- Import functions from processing_logic.py ---
+from processing_logic import check_folder_exists
+from processing_logic import get_initial_legacy_folder_name_and_data
+from processing_logic import handle_legacy_contract_processing
+from processing_logic import copy_pdf_to_folder
+# Ensure os is imported for os.path.basename if used directly after these imports (it's used locally in methods)
 
 # Optional: Set a modern style
 try:
@@ -135,36 +142,50 @@ modern_stylesheet = r"""
 
     QComboBox QAbstractItemView::item {
         padding: 5px 8px;             
-        background-color: transparent;
-        
-        /* Using a transparent border by default to reserve space */
-        border: 1px solid transparent; 
-        /* border-radius: 3px; */ /* Temporarily commented for simpler debugging */
-        
+        background-color: transparent; /* Keep this transparent */
+        border: 1px solid transparent; /* Border that will be 'overwritten' by hover's border */
         color: #e8eaed;               
         min-height: 20px;             
-        outline: none; /* Ensure no native outline interferes */
+        outline: none; 
     }
 
     QComboBox QAbstractItemView::item:hover {
-        background-color: #8ab4f8;;  /* This part seems to work (background changes) */
-        
-        /* --- DEBUGGING BORDER --- */
-        /* Try a very obvious border to see if *any* border change is applied */
-        border: 3px solid red !important; 
-        /* If red border appears, the issue is with the blue color's visibility or subtle conflict. */
-        /* If red border does NOT appear, the issue is more fundamental with applying border to item:hover. */
-        
-        /* Original intended style (once red border test is done): */
-        /* border: 1px solid #8ab4f8; */
-        /* border-radius: 3px; */ /* Restore if previously commented out */
+        background-color: #8ab4f8 !important;
+        color: #202124 !important;
+        border: 1px solid #8ab4f8 !important; /* Match background to make border seamless */
+        outline: none !important;
     }
 
     QComboBox QAbstractItemView::item:selected {
         background-color: #8ab4f8;      
         color: #202124;                   
-        border: 1px solid #8ab4f8; 
-        /* border-radius: 3px; */ /* Restore if base item has it */
+        border: 1px solid #8ab4f8; /* Border for selected item */
+        /* border-radius: 3px; */ 
+    }
+    
+    /* Custom QComboBox QListView styling for our CustomComboBox */
+    QComboBox QListView {
+        background-color: #2d2e31;
+        border: 1px solid #5f6368;
+        color: #e8eaed;
+        outline: none;
+        border-radius: 4px;
+        padding: 0px;
+        margin: 0px;
+    }
+    QComboBox QListView::item {
+        padding: 6px 10px;
+        border: none;
+        color: #e8eaed;
+        margin: 0px;
+    }
+    QComboBox QListView::item:hover {
+        background-color: #4a4d50;
+        color: #ffffff;
+    }
+    QComboBox QListView::item:selected {
+        background-color: #8ab4f8;
+        color: #202124;
     }
     /* --- End QComboBox Dropdown List Styling --- */
 
@@ -345,8 +366,22 @@ modern_stylesheet = r"""
 
 
 # ==============================================================================
-# SECTION 2: CLASS DEFINITIONS (e.g., PDFListWidget, ContractProcessorApp)
+# SECTION 2: CLASS DEFINITIONS (e.g., PDFListWidget, CustomComboBox, ContractProcessorApp)
 # ==============================================================================
+
+class CustomComboBox(QComboBox):
+    """Custom QComboBox with working hover effects while preserving dropdown arrow"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setup_custom_styling()
+    
+    def setup_custom_styling(self):
+        # Create a clean QListView for the dropdown
+        list_view = QListView()
+        list_view.setSpacing(0)  # Remove spacing between items
+        list_view.setContentsMargins(0, 0, 0, 0)  # Remove margins
+        self.setView(list_view)
+        # Note: The dropdown arrow styling is preserved from the global CSS
 
 
 class PDFListWidget(QListWidget):
@@ -447,6 +482,7 @@ class ContractProcessorApp(QMainWindow):
 
         self.init_ui() # This will now create widgets that get styled by the global QSS
         self.log_message("Application initialized. Ready.")
+        self.extracted_data_cache = None # To store data from initial parsing for later use
 
     # def setup_modern_palette(self): # ENTIRE METHOD REMOVED
     #     pass
@@ -518,13 +554,24 @@ class ContractProcessorApp(QMainWindow):
         form_layout.setSpacing(10)
         form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
-        self.contract_type_combo = QComboBox()
+        # *** CHANGED: Use CustomComboBox instead of QComboBox ***
+        self.contract_type_combo = CustomComboBox()
         self.contract_type_combo.setPlaceholderText("Select or type contract type...")
         self.contract_type_combo.setEditable(False)
         self.contract_type_combo.addItems(["Legacy", "MS Assoc. of Realtors", "Other"])
+        self.contract_type_combo.setCurrentText("Legacy")
         self.contract_type_combo.setToolTip("Select the type of contract being processed.")
         form_layout.addRow(QLabel("Contract Type:"), self.contract_type_combo)
         layout.addLayout(form_layout)
+
+        # Output directory line edit (created before connecting the signal)
+        self.output_dir_edit = QLineEdit() # Ensure output_dir_edit is created
+        self.output_dir_edit.setPlaceholderText("Select directory...")
+        self.output_dir_edit.setReadOnly(False)
+        self.output_dir_edit.setText("C:/Closings/Legacy Seller") # Set default output dir
+
+        # Connect signal for contract type change
+        self.contract_type_combo.currentTextChanged.connect(self._update_output_directory_for_contract_type)
 
         self.output_options_group = QGroupBox("Desired Outputs")
         output_options_layout = QVBoxLayout()
@@ -564,9 +611,7 @@ class ContractProcessorApp(QMainWindow):
 
         output_dir_layout = QHBoxLayout()
         self.output_dir_label = QLabel("Output Directory:")
-        self.output_dir_edit = QLineEdit()
-        self.output_dir_edit.setPlaceholderText("Select directory...")
-        self.output_dir_edit.setReadOnly(False)
+        # self.output_dir_edit is already created and default set above
         
         self.btn_select_output_dir = QPushButton("Select Output Directory")
         self.btn_select_output_dir.setObjectName("selectOutputDirectoryButton")
@@ -583,6 +628,12 @@ class ContractProcessorApp(QMainWindow):
         self.btn_start_processing.setObjectName("startProcessingButton")
         self.btn_start_processing.clicked.connect(self._start_processing_placeholder)
         layout.addWidget(self.btn_start_processing, 0, Qt.AlignmentFlag.AlignCenter)
+
+    def _update_output_directory_for_contract_type(self, contract_type_text):
+        if contract_type_text == "Legacy":
+            self.output_dir_edit.setText("C:/Closings/Legacy Seller")
+        else:
+            self.output_dir_edit.setText("C:/Closings")
 
     def _create_data_viewer_tab(self):
         layout = QVBoxLayout(self.data_viewer_tab)
@@ -623,99 +674,210 @@ class ContractProcessorApp(QMainWindow):
             self.output_dir_edit.setText(dir_path)
             self.log_message(f"Output directory selected: {dir_path}")
 
-    def _start_processing_placeholder(self):
+    def _get_and_validate_processing_inputs(self):
+        """
+        Retrieves and validates the necessary inputs from the UI for processing.
+        Returns a tuple: (contract_type, single_pdf_file, output_dir, generate_label, generate_docs)
+        Returns None for all values if validation fails.
+        """
         contract_type = self.contract_type_combo.currentText()
-        generate_label = self.chk_generate_file_label.isChecked()
-        generate_docs = self.chk_generate_setup_docs.isChecked()
-        pdfs = [self.pdf_list_widget.item(i).text() for i in range(self.pdf_list_widget.count())]
+        generate_label = self.chk_generate_file_label.isChecked() # Currently not used by legacy, but good to get
+        generate_docs = self.chk_generate_setup_docs.isChecked()  # Currently not used by legacy
+        
+        pdfs_list = [self.pdf_list_widget.item(i).text() for i in range(self.pdf_list_widget.count())]
+        single_pdf_file = pdfs_list[0] if pdfs_list else None
         output_dir = self.output_dir_edit.text()
-        single_pdf_file = None
-        if self.pdf_list_widget.count() > 0:
-            single_pdf_file = self.pdf_list_widget.item(0).text()
 
         if not single_pdf_file:
             self.show_warning("No PDF file selected.")
             self.log_message("Processing attempted with no PDF.", "WARNING")
-            return
-        if not pdfs:
-            self.show_warning("No PDF files selected.")
-            self.log_message("Processing attempted with no PDFs.", "WARNING")
-            return
+            return None, None, None, None, None
         if not output_dir:
             self.show_warning("Output directory not selected.")
             self.log_message("Processing attempted with no output directory.", "WARNING")
-            return
-        if not contract_type:
+            return None, None, None, None, None
+        if not contract_type: # Should not happen if a default is set
             self.show_warning("No contract type selected.")
             self.log_message("Processing attempted with no contract type selected.", "WARNING")
+            return None, None, None, None, None
+        
+        return contract_type, single_pdf_file, output_dir, generate_label, generate_docs
+
+    def _negotiate_legacy_folder_name(self, output_dir: str, proposed_folder_name: str, extracted_data: dict) -> str | None:
+        """
+        Handles the logic for checking if a folder exists and prompting the user
+        for overwrite or rename if it does.
+        Returns the final folder name to be used, or None if processing should be cancelled.
+        """
+        # 'check_folder_exists' is now imported at the top level
+        import os # for os.path.join
+
+        target_path = os.path.join(output_dir, proposed_folder_name)
+        final_folder_name = proposed_folder_name
+
+        if check_folder_exists(target_path):
+            overwrite_reply = QMessageBox.question(
+                self, "Folder Exists",
+                f"Folder '{proposed_folder_name}' already exists in '{output_dir}'.\nDo you want to overwrite it?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+
+            if overwrite_reply == QMessageBox.StandardButton.No:
+                rename_reply = QMessageBox.question(
+                    self, "Rename Folder",
+                    "Do you want to rename the new folder? If no, processing for this item will be cancelled.",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes
+                )
+                if rename_reply == QMessageBox.StandardButton.Yes:
+                    new_name_candidate, ok = QInputDialog.getText(
+                        self, "Rename Folder", "Enter new folder name:", text=proposed_folder_name
+                    )
+                    if ok and new_name_candidate and new_name_candidate.strip():
+                        final_folder_name = new_name_candidate.strip()
+                        self.log_message(f"Folder will be named: {final_folder_name}", "INFO")
+                    else:
+                        self.log_message(f"Folder renaming cancelled or invalid name for {proposed_folder_name}.", "INFO")
+                        if extracted_data: self.update_extracted_data_viewer(extracted_data)
+                        return None  # Cancel processing
+                else:  # User chose not to rename
+                    self.log_message(f"Processing cancelled for {proposed_folder_name} due to existing folder and no rename.", "INFO")
+                    if extracted_data: self.update_extracted_data_viewer(extracted_data)
+                    return None  # Cancel processing
+            else: # User chose to overwrite
+                self.log_message(f"Proceeding with overwriting folder: {proposed_folder_name}", "INFO")
+        
+        return final_folder_name
+
+
+    def _handle_legacy_processing(self, single_pdf_file: str, output_dir: str):
+        """
+        Orchestrates the processing for "Legacy" contract type.
+        Functions from processing_logic are now imported at the top level.
+        """
+        import os # For os.path.basename
+
+        # 1. Get proposed folder name and initial extracted data
+        self.log_message(f"Initiating Legacy processing for: {single_pdf_file}", "INFO")
+        proposed_folder_name, extracted_data, error_message = get_initial_legacy_folder_name_and_data(single_pdf_file)
+        self.extracted_data_cache = extracted_data # Cache data for viewer, regardless of subsequent success/failure
+
+        if error_message or not proposed_folder_name:
+            self.log_message(f"Failed to get proposed folder name or parse data: {error_message}", "ERROR")
+            self.show_warning(f"Could not determine folder name or parse essential data: {error_message}")
+            if extracted_data: self.update_extracted_data_viewer(extracted_data) # Show partial data
+            return # Stop legacy processing
+
+        # 2. Negotiate folder name (handles existence checks and user dialogs)
+        final_folder_name_for_processing = self._negotiate_legacy_folder_name(output_dir, proposed_folder_name, extracted_data)
+
+        if not final_folder_name_for_processing:
+            # User cancelled or provided invalid input during negotiation
+            # Log messages are handled within _negotiate_legacy_folder_name
+            # self.update_extracted_data_viewer(extracted_data) # Ensure data is shown if negotiation fails
+            return # Stop legacy processing
+
+        # 3. Call the main processing logic from processing_logic.py
+        # IMPORTANT: For real application, run this in a QThread
+        self.log_message(f"Calling core processing for folder: {final_folder_name_for_processing}", "INFO")
+        created_path, message = handle_legacy_contract_processing(
+            [single_pdf_file], output_dir, final_folder_name_for_processing, extracted_data
+        )
+
+        # 4. Handle results of folder creation and PDF copying
+        if created_path:
+            self.log_message(f"SUCCESS (Legacy Folder Structure): {message}", "INFO")
+            
+            # Copy the PDF to the newly created folder
+            pdf_filename_to_copy = os.path.basename(single_pdf_file)
+            copy_success, copy_message = copy_pdf_to_folder(single_pdf_file, created_path, pdf_filename_to_copy)
+            
+            if copy_success:
+                self.log_message(copy_message, "INFO")
+                QMessageBox.information(self, "Processing Complete",
+                                        f"Legacy contract structure created/updated at:\n{created_path}\n"
+                                        f"PDF '{pdf_filename_to_copy}' copied successfully.")
+            else:
+                self.log_message(copy_message, "ERROR")
+                QMessageBox.warning(self, "Processing Warning",
+                                    f"Legacy contract structure created/updated at:\n{created_path}\n"
+                                    f"BUT, failed to copy PDF: {copy_message}")
+        else:
+            self.log_message(f"ERROR (Legacy Folder Structure): {message}", "ERROR")
+            self.show_warning(f"Legacy processing failed: {message}")
+        
+        self.update_extracted_data_viewer(extracted_data) # Show data from cache (updated or original)
+
+
+    def _start_processing_placeholder(self):
+        """
+        Main entry point for the 'Start Processing' button click.
+        Orchestrates input validation and calls appropriate handlers based on contract type.
+        """
+        inputs = self._get_and_validate_processing_inputs()
+        if not all(inputs): # If any input is None (validation failed)
             return
 
-        self.log_message(f"Starting processing (placeholder)...")
+        contract_type, single_pdf_file, output_dir, generate_label, generate_docs = inputs
+
+        # Log initial user-selected options
+        self.log_message(f"Starting processing...")
         self.log_message(f"  Contract Type: {contract_type}")
-        self.log_message(f"  Generate Label: {generate_label}")
-        self.log_message(f"  Generate Docs: {generate_docs}")
-        self.log_message(f"  PDFs: {len(pdfs)} file(s)")
-        self.log_message(f"  Output Dir: {output_dir}")
-        self.log_message(f"Starting processing for contract type: {contract_type}...")
+        self.log_message(f"  Generate Label: {generate_label}") # Will be used by specific handlers if needed
+        self.log_message(f"  Generate Docs: {generate_docs}")   # Will be used by specific handlers if needed
         self.log_message(f"  PDF: {single_pdf_file}")
+        self.log_message(f"  Output Dir: {output_dir}")
+        
         self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0,100)
+        self.progress_bar.setRange(0, 100) # Start with a determinate progress bar
         self.status_label.setText(f"Processing {contract_type}...")
 
         if contract_type == "Legacy":
-            from processing_logic import handle_legacy_contract_processing # Ensure this import is correct
-
-            # IMPORTANT: For real application, run this in a QThread
-            # For now, direct call:
-            created_path, message, extracted_data_dict = handle_legacy_contract_processing([single_pdf_file], output_dir)
-
-            if created_path and extracted_data_dict:
-                self.log_message(f"SUCCESS (Legacy): {message}", "INFO")
-                QMessageBox.information(self, "Processing Complete", f"Legacy contract structure created at:\n{created_path}")
-                self.update_extracted_data_viewer(extracted_data_dict) # <--- NEW CALL
-            else:
-                self.log_message(f"ERROR (Legacy): {message}", "ERROR")
-                self.show_warning(f"Legacy processing failed: {message}")
-                if extracted_data_dict: # Show partial data if any was extracted before failure
-                    self.update_extracted_data_viewer(extracted_data_dict)
-
-        else:
+            self._handle_legacy_processing(single_pdf_file, output_dir)
+        else: # Other contract types
             self.log_message(f"Processing logic for '{contract_type}' is not yet implemented.", "WARNING")
             QMessageBox.information(self, "Processing", f"Placeholder processing for {contract_type} complete!")
-            self.data_table.setRowCount(0) # Clear table for non-legacy types for now
+            self.data_table.setRowCount(0) # Clear table for non-legacy types
+            self.extracted_data_cache = None # Clear cache
 
-        self.progress_bar.setRange(0,100)
-        self.progress_bar.setValue(100)
+        # Finalize UI state
+        self.progress_bar.setValue(100) # Indicate completion
         self.progress_bar.setVisible(False)
         self.status_label.setText("Processing finished.")
 
-    def update_extracted_data_viewer(self, data_dict):
+
+    def update_extracted_data_viewer(self, data_dict_to_display):
         """
         Populates the QTableWidget in the 'Extracted Data Viewer' tab.
+        Uses self.extracted_data_cache if data_dict_to_display is None.
         """
-        if not data_dict:
+        data_to_use = data_dict_to_display if data_dict_to_display is not None else self.extracted_data_cache
+
+        if not data_to_use:
             self.data_table.setRowCount(0) # Clear table if no data
             self.log_message("No data to display in viewer.", "INFO")
             return
 
         self.data_table.setRowCount(0) # Clear previous data
-        self.data_table.setRowCount(len(data_dict))
+        self.data_table.setRowCount(len(data_to_use))
 
         row = 0
-        for key, value in data_dict.items():
+        for key, value in data_to_use.items():
             key_item = QTableWidgetItem(str(key))
             value_item = QTableWidgetItem(str(value) if value is not None else "") # Handle None values
 
             # Make items non-editable for now, but selectable
             key_item.setFlags(key_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            value_item.setFlags(value_item.flags() & ~Qt.ItemFlag.ItemIsEditable) # For future editing, change this
+            value_item.setFlags(value_item.flags() & ~Qt.ItemFlag.ItemIsEditable) 
 
             self.data_table.setItem(row, 0, key_item)
             self.data_table.setItem(row, 1, value_item)
             row += 1
         
-        self.log_message(f"Displayed {len(data_dict)} items in Extracted Data Viewer.", "INFO")
+        self.log_message(f"Displayed {len(data_to_use)} items in Extracted Data Viewer.", "INFO")
         self.tab_widget.setCurrentWidget(self.data_viewer_tab) # Switch to the data viewer tab
+        # self.extracted_data_cache = None # Optionally clear cache after display or keep it
 
     def _update_progress_simulation(self):
         self.current_progress += 10

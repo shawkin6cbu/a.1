@@ -1,5 +1,6 @@
 import re
 import os
+import shutil # Import shutil
 from io import StringIO
 from datetime import datetime
 from pdfminer.converter import TextConverter
@@ -32,6 +33,11 @@ def extract_text_from_pdf(pdf_path):
     return output_string.getvalue()
 
 
+# New function to check folder existence
+def check_folder_exists(target_folder_path: str) -> bool:
+    """Checks if a folder or file already exists at the given path."""
+    return os.path.exists(target_folder_path)
+
 
 def preprocess_text_initial(text):
     """
@@ -57,9 +63,10 @@ def normalize_multiple_spaces_in_text(text_segment):
 
 
 
-def preprocess_text_globally(text):  # ENSURE THIS FUNCTION IS DEFINED
+def preprocess_text_globally(text):
     """
     General preprocessing: Applies initial cleaning and then normalizes multiple spaces.
+    This is a global cleaner used before detailed parsing.
     """
     if text is None:
         return None
@@ -68,10 +75,16 @@ def preprocess_text_globally(text):  # ENSURE THIS FUNCTION IS DEFINED
     return text
 
 
-
-def parse_any_legacy_contract_text(original_text_from_pdf):
+def parse_any_legacy_contract_text(original_text_from_pdf: str) -> dict:
+    """
+    Parses the raw text extracted from a Legacy contract PDF to find specific data fields.
+    Uses a series of regular expressions and text processing techniques.
+    The `original_text_from_pdf` should be the direct output from `extract_text_from_pdf`.
+    """
     data = {}
 
+    # Preprocess text: initial cleaning for sensitive parsing (e.g., names before space normalization)
+    # and global cleaning for general field extraction.
     text_for_sensitive_parsing = preprocess_text_initial(original_text_from_pdf)
     globally_cleaned_text = normalize_multiple_spaces_in_text(text_for_sensitive_parsing)
 
@@ -300,119 +313,199 @@ def parse_any_legacy_contract_text(original_text_from_pdf):
     return data
 
 
-
-def generate_legacy_folder_name(extracted_data):
-    """Generates the folder name based on extracted BYR1NAM1."""
+def generate_legacy_folder_name(extracted_data: dict) -> str:
+    """
+    Generates a standardized folder name for a Legacy contract based on extracted data,
+    primarily using the first buyer's name (BYR1NAM1).
+    The format is typically "LastName, FirstName  25-" or "CompanyName  25-".
+    """
     byr1nam1 = extracted_data.get('BYR1NAM1')
     if byr1nam1:
-        # Attempt to split into last name, first name if possible
-        # This is a simple split, might need refinement based on actual byr1nam1 format
         name_parts = byr1nam1.split(',')
-        if len(name_parts) > 1: # "Smith, Joe"
+        if len(name_parts) > 1:
             last_name = name_parts[0].strip()
             first_name = name_parts[1].strip()
-        else: # "Joe Smith" or just "Smith Inc"
+        else:
             name_parts_space = byr1nam1.split()
             if len(name_parts_space) > 1:
-                last_name = name_parts_space[-1] # Assume last word is last name
+                last_name = name_parts_space[-1]
                 first_name = " ".join(name_parts_space[:-1])
             else:
-                last_name = byr1nam1 # Use the whole thing if it's a single word/company
+                last_name = byr1nam1
                 first_name = ""
-        
-        # Sanitize names for folder creation (remove invalid characters)
         first_name_safe = re.sub(r'[<>:"/\\|?*]', '', first_name)
         last_name_safe = re.sub(r'[<>:"/\\|?*]', '', last_name)
-
-        if first_name_safe:
-            return f"{last_name_safe}, {first_name_safe}  25-"
-        else:
-            return f"{last_name_safe}  25-"
-
-    return "Unknown_Entity  25-" # Fallback name
+        return f"{last_name_safe}, {first_name_safe}  25-" if first_name_safe else f"{last_name_safe}  25-"
+    return "Unknown_Entity  25-"
 
 
+# New function to copy PDF
+def copy_pdf_to_folder(source_pdf_path: str, destination_folder_path: str, pdf_filename: str) -> tuple[bool, str]:
+    """Copies the source PDF to the destination folder."""
+    full_dest_pdf_path = os.path.join(destination_folder_path, pdf_filename)
+    try:
+        shutil.copy2(source_pdf_path, full_dest_pdf_path)
+        print(f"INFO: Successfully copied {pdf_filename} to {destination_folder_path}")
+        return True, f"Successfully copied {pdf_filename} to {destination_folder_path}"
+    except (IOError, shutil.Error) as e:
+        print(f"ERROR: Error copying {pdf_filename}: {e}")
+        return False, f"Error copying {pdf_filename}: {e}"
 
-def create_legacy_contract_folder_structure(base_output_dir, folder_name, extracted_data): # Added extracted_data
+
+# New function to get initial folder name and data for GUI checks
+def get_initial_legacy_folder_name_and_data(pdf_file_path: str) -> tuple[str | None, dict | None, str | None]:
     """
-    Creates the specific folder structure for a Legacy contract.
+    Extracts text, parses it, generates a folder name, and returns these.
+    This function serves as a preliminary step, often called by the GUI, 
+    to get essential information for checks like folder existence before 
+    committing to the full folder creation and file population process.
+
+    Args:
+        pdf_file_path: The path to the PDF file to be processed.
+
+    Returns:
+        A tuple containing:
+            - generated_name (str | None): The proposed folder name.
+            - extracted_data (dict | None): The data extracted from the PDF.
+            - error_message (str | None): An error message if any issue occurred, otherwise None.
     """
-    full_folder_path = os.path.join(base_output_dir, folder_name)
-    print(f"INFO: Creating Legacy contract folder at: {full_folder_path}")
+    try:
+        print(f"INFO: Initial PDF text extraction for folder name generation: {pdf_file_path}")
+        raw_text = extract_text_from_pdf(pdf_file_path)
+        if not raw_text:
+            error_msg = f"Could not extract any text from {pdf_file_path} for folder naming."
+            print(f"ERROR: {error_msg}")
+            return None, None, error_msg
+        
+        print(f"INFO: Initial parsing for folder name generation: {pdf_file_path}")
+        extracted_data = parse_any_legacy_contract_text(raw_text)
+        # Check for essential data needed for folder name (e.g., BYR1NAM1)
+        if not extracted_data or not extracted_data.get('BYR1NAM1'):
+            error_msg = f"Failed to parse essential data (like BYR1NAM1) from {pdf_file_path} for folder naming."
+            print(f"ERROR: {error_msg}")
+            return None, extracted_data, error_msg # Return partial data if any for context
+
+        folder_name = generate_legacy_folder_name(extracted_data)
+        return folder_name, extracted_data, None # Success
+    except Exception as e:
+        error_msg = f"An error occurred during initial processing for {pdf_file_path}: {e}"
+        print(f"CRITICAL ERROR: {error_msg}")
+        return None, None, error_msg
+
+
+def create_legacy_contract_folder_structure(final_folder_path: str, extracted_data: dict) -> tuple[str, bool]:
+    """
+    Creates the specific folder structure for a Legacy contract at the `final_folder_path`.
+    This includes:
+    - The main client folder.
+    - An "overlay.pxt" file containing all extracted data.
+    - A "Setup" subfolder.
+    - A "TitleSearch" subfolder.
+    - "file label.docx" and "setupdocs.docx" (placeholder content) within the "Setup" subfolder.
+
+    Args:
+        final_folder_path: The absolute path where the folder structure should be created.
+                           This path is determined by the GUI, possibly after user input for renaming.
+        extracted_data: A dictionary containing data extracted from the PDF, used to populate
+                        the .pxt file and potentially other generated files.
+
+    Returns:
+        A tuple containing:
+            - final_folder_path (str): The path where the structure was attempted.
+            - success (bool): True if creation was successful, False otherwise.
+    """
+    # final_folder_path is the full absolute path, decided by the GUI after any negotiations (e.g., renaming).
+    print(f"INFO: Creating Legacy contract folder at: {final_folder_path}")
 
     try:
-        os.makedirs(full_folder_path, exist_ok=True)
+        os.makedirs(final_folder_path, exist_ok=True)
 
         # Create "overlay.pxt" with all extracted data
         entity_list_content = []
-        for key, value in extracted_data.items():
-            entity_list_content.append(f"{key}: {value}")
+        if extracted_data: # Ensure extracted_data is not None
+            for key, value in extracted_data.items():
+                entity_list_content.append(f"{key}: {value}")
         
-        with open(os.path.join(full_folder_path, "overlay.pxt"), "w") as f:
+        with open(os.path.join(final_folder_path, "overlay.pxt"), "w") as f:
             f.write("\n".join(entity_list_content))
             f.write("\n\n--- End of Extracted Data ---")
 
-        # Placeholder files (content to be generated later based on extracted_data)
-        with open(os.path.join(full_folder_path, "file label.docx"), "w") as f:
-            f.write(f"File Label for: {folder_name}\n")
-            f.write(f"Property Address: {extracted_data.get('PROPSTRE', 'N/A')}\n")
-            # Add more relevant data to the label
-        with open(os.path.join(full_folder_path, "setupdocs.docx"), "w") as f:
-            f.write(f"Setup Documents for: {folder_name}\n")
-            # Add more relevant data
-
-        # Create subfolders
-        os.makedirs(os.path.join(full_folder_path, "Setup"), exist_ok=True)
-        os.makedirs(os.path.join(full_folder_path, "TitleSearch"), exist_ok=True)
-
-        print(f"SUCCESS: Created folder structure for '{folder_name}'")
-        return full_folder_path, True
-    except OSError as e:
-        print(f"ERROR: Could not create folder structure for '{folder_name}'. Error: {e}")
-        return full_folder_path, False
-
-
-
-def handle_legacy_contract_processing(pdf_file_paths, user_selected_output_dir):
-    """
-    Main handler for processing "Legacy" contracts.
-    """
-    if not pdf_file_paths:
-        print("ERROR: No PDF files provided for Legacy processing.")
-        return None, "No PDF files provided.", None # Return None for data too
-
-    # For now, process the first PDF. You might need a loop or different logic later.
-    main_pdf_path = pdf_file_paths[0]
-    
-    try:
-        print(f"INFO: Starting PDF text extraction for {main_pdf_path}")
-        raw_text = extract_text_from_pdf(main_pdf_path)
-        if not raw_text:
-            error_msg = f"Could not extract any text from {main_pdf_path}."
-            print(f"ERROR: {error_msg}")
-            return None, error_msg, None
+        # Placeholder files
+        # Use final_folder_path's basename for user-facing messages/content if needed
+        folder_basename = os.path.basename(final_folder_path)
         
-        print(f"INFO: Starting parsing for {main_pdf_path}")
-        extracted_data = parse_any_legacy_contract_text(raw_text)
-        if not extracted_data or not extracted_data.get('BYR1NAM1'): # Check if essential data is present
-            error_msg = f"Failed to parse essential data (like BYR1NAM1) from {main_pdf_path}."
-            print(f"ERROR: {error_msg}")
-            return None, error_msg, extracted_data # Return partial data if any
+        # Create subfolders first (ensure "Setup" exists before writing files into it)
+        setup_subfolder_path = os.path.join(final_folder_path, "Setup")
+        os.makedirs(setup_subfolder_path, exist_ok=True)
+        os.makedirs(os.path.join(final_folder_path, "TitleSearch"), exist_ok=True)
 
-    except Exception as e:
-        error_msg = f"An error occurred during PDF processing or parsing for {main_pdf_path}: {e}"
-        print(f"CRITICAL ERROR: {error_msg}")
-        # import traceback
-        # traceback.print_exc() # For detailed debugging
-        return None, error_msg, None
+        # Place files into the "Setup" subfolder
+        file_label_path = os.path.join(setup_subfolder_path, "file label.docx")
+        with open(file_label_path, "w") as f:
+            f.write(f"File Label for: {folder_basename}\n")
+            if extracted_data:
+                f.write(f"Property Address: {extracted_data.get('PROPSTRE', 'N/A')}\n")
+        
+        setup_docs_path = os.path.join(setup_subfolder_path, "setupdocs.docx")
+        with open(setup_docs_path, "w") as f:
+            f.write(f"Setup Documents for: {folder_basename}\n")
 
-    folder_name = generate_legacy_folder_name(extracted_data)
-    created_folder_path, success = create_legacy_contract_folder_structure(
-        user_selected_output_dir, folder_name, extracted_data # Pass extracted_data
+        print(f"SUCCESS: Created folder structure in '{final_folder_path}' with documents in 'Setup' subfolder.")
+        return final_folder_path, True # Return path and success
+    except OSError as e:
+        print(f"ERROR: Could not create folder structure in '{final_folder_path}'. Error: {e}")
+        return final_folder_path, False # Return path and failure
+
+
+def handle_legacy_contract_processing(
+    pdf_file_paths, # Though we might only use the first one if GUI passes one by one
+    user_selected_output_dir: str, 
+    processed_folder_name: str, # This is the name decided by GUI (original or renamed)
+    extracted_data_from_gui: dict # This is the data from get_initial_legacy_folder_name_and_data
+    ):
+    """
+    Main handler for the core logic of processing "Legacy" contracts.
+    This function is called by the GUI after:
+    1. Initial data extraction and folder name generation (`get_initial_legacy_folder_name_and_data`).
+    2. User validation/confirmation of the output folder name (including overwrite/rename dialogs).
+    
+    It assumes the `processed_folder_name` and `extracted_data_from_gui` are finalized and correct.
+    Its main responsibility is to call `create_legacy_contract_folder_structure`.
+    The actual PDF text extraction and parsing are expected to have happened in the
+    `get_initial_legacy_folder_name_and_data` step, and the results passed via `extracted_data_from_gui`.
+
+    Args:
+        pdf_file_paths: A list of PDF file paths (though typically only the first is used for Legacy).
+        user_selected_output_dir: The base directory selected by the user for output.
+        processed_folder_name: The final, confirmed name for the client-specific folder.
+        extracted_data_from_gui: The dictionary of data extracted by `get_initial_legacy_folder_name_and_data`.
+
+    Returns:
+        A tuple containing:
+            - created_folder_path (str | None): The full path to the created folder if successful, else None.
+            - message_string (str): A message detailing the outcome of the operation.
+    """
+    # Input validation (should ideally be guaranteed by GUI calling sequence)
+    if not pdf_file_paths:
+        return None, "No PDF files provided for processing."
+    if not user_selected_output_dir: # Added for robustness
+        return None, "Output directory not specified."
+    if not processed_folder_name:
+        return None, "No folder name provided for processing."
+    if not extracted_data_from_gui:
+        return None, "No extracted data provided for processing."
+
+    # Construct the final, absolute path for the client-specific folder
+    final_folder_path = os.path.join(user_selected_output_dir, processed_folder_name)
+    
+    # Delegate the actual folder and file creation
+    created_path, success = create_legacy_contract_folder_structure(
+        final_folder_path, 
+        extracted_data_from_gui
     )
 
     if success:
-        print(f"INFO: Further processing for files in '{created_folder_path}' would happen here.")
-        return created_folder_path, f"Successfully created structure for {folder_name}", extracted_data
+        # The GUI already has the extracted_data, so we just return the path and success message.
+        return created_path, f"Successfully created folder structure in '{processed_folder_name}'"
     else:
-        return None, f"Failed to create structure for {folder_name}", extracted_data
+        return None, f"Failed to create folder structure for '{processed_folder_name}'"
