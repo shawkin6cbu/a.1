@@ -1,5 +1,19 @@
-from PyQt6.QtWidgets import QListWidget, QFileDialog
-from PyQt6.QtCore import pyqtSignal, Qt, QDir
+from PyQt6.QtWidgets import QComboBox, QListWidget, QFileDialog, QListView
+from PyQt6.QtCore import Qt, pyqtSignal, QDir
+
+class CustomComboBox(QComboBox):
+    """Custom QComboBox with working hover effects while preserving dropdown arrow"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setup_custom_styling()
+
+    def setup_custom_styling(self):
+        # Create a clean QListView for the dropdown
+        list_view = QListView()
+        list_view.setSpacing(0)  # Remove spacing between items
+        list_view.setContentsMargins(0, 0, 0, 0)  # Remove margins
+        self.setView(list_view)
+        # Note: The dropdown arrow styling is preserved from the global CSS
 
 class PDFListWidget(QListWidget):
     files_added = pyqtSignal(list)
