@@ -1,6 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QGroupBox, QCheckBox, QLabel, QPushButton, QLineEdit, 
+    QGroupBox, QCheckBox, QLabel, QPushButton, QLineEdit,
+    QRadioButton,  # Added QRadioButton
     QSizePolicy, QSpacerItem
 )
 from PyQt6.QtCore import Qt
@@ -48,10 +49,56 @@ def create_processing_tab(main_window_instance):
     main_window_instance.chk_generate_file_label.setChecked(True)
     main_window_instance.chk_generate_setup_docs.setChecked(True)
 
+    # Connect signal for chk_generate_setup_docs
+    main_window_instance.chk_generate_setup_docs.toggled.connect(main_window_instance._toggle_setup_docs_options)
+
     output_options_layout.addWidget(main_window_instance.chk_generate_file_label)
     output_options_layout.addWidget(main_window_instance.chk_generate_setup_docs)
     main_window_instance.output_options_group.setLayout(output_options_layout)
     layout.addWidget(main_window_instance.output_options_group)
+
+    # --- Setup Docs Options Group ---
+    main_window_instance.setup_docs_options_group = QGroupBox("Setup Docs Options")
+    setup_docs_options_layout = QVBoxLayout()
+
+    # Purchase/Refi Radio Buttons
+    main_window_instance.rb_purchase = QRadioButton("Purchase")
+    main_window_instance.rb_purchase.setChecked(True)
+    main_window_instance.rb_refi = QRadioButton("Refi")
+
+    # Connect signal for rb_refi
+    main_window_instance.rb_refi.toggled.connect(main_window_instance._handle_refi_selection)
+    
+    purchase_refi_layout = QHBoxLayout()
+    purchase_refi_layout.addWidget(main_window_instance.rb_purchase)
+    purchase_refi_layout.addWidget(main_window_instance.rb_refi)
+    setup_docs_options_layout.addLayout(purchase_refi_layout)
+
+    # Buyer/Seller Checkboxes
+    main_window_instance.chk_buyer = QCheckBox("Buyer")
+    main_window_instance.chk_buyer.setChecked(True)
+    main_window_instance.chk_seller = QCheckBox("Seller")
+    main_window_instance.chk_seller.setChecked(True)
+
+    buyer_seller_layout = QHBoxLayout()
+    buyer_seller_layout.addWidget(main_window_instance.chk_buyer)
+    buyer_seller_layout.addWidget(main_window_instance.chk_seller)
+    setup_docs_options_layout.addLayout(buyer_seller_layout)
+
+    # CD/HUD Radio Buttons
+    main_window_instance.rb_cd = QRadioButton("CD")
+    main_window_instance.rb_cd.setChecked(True)
+    main_window_instance.rb_hud = QRadioButton("HUD")
+
+    cd_hud_layout = QHBoxLayout()
+    cd_hud_layout.addWidget(main_window_instance.rb_cd)
+    cd_hud_layout.addWidget(main_window_instance.rb_hud)
+    setup_docs_options_layout.addLayout(cd_hud_layout)
+
+    main_window_instance.setup_docs_options_group.setLayout(setup_docs_options_layout)
+    main_window_instance.setup_docs_options_group.setVisible(False) # Initially hidden
+    layout.addWidget(main_window_instance.setup_docs_options_group)
+    # --- End Setup Docs Options Group ---
 
     # === MODIFIED PDF Input Section ===
     pdf_input_group = QGroupBox("PDF Input")
