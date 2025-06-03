@@ -316,7 +316,33 @@ class ContractProcessorApp(QMainWindow):
             "This application is a front-end for processing contracts."
         )
 
+    # --- Custom Slot for Setup Docs Options ---
+    def _toggle_setup_docs_options(self, checked: bool):
+        if hasattr(self, 'setup_docs_options_group'):
+            self.setup_docs_options_group.setVisible(checked)
+            self.log_message(f"Setup Docs Options visibility toggled to: {checked}", "DEBUG")
+        else:
+            self.log_message("setup_docs_options_group not found on main window.", "ERROR")
+
+    # --- Custom Slot for Refi Selection ---
+    def _handle_refi_selection(self):
+        if hasattr(self, 'rb_refi') and hasattr(self, 'chk_seller'):
+            if self.rb_refi.isChecked():
+                self.chk_seller.setChecked(False)
+                self.chk_seller.setEnabled(False)
+                self.log_message("Refi selected: Seller checkbox unchecked and disabled.", "DEBUG")
+            else: # Purchase is selected
+                self.chk_seller.setEnabled(True)
+                # Note: We don't re-check seller automatically when switching back to Purchase.
+                # The user's previous explicit unchecking of Seller (if any) is preserved.
+                self.log_message("Purchase selected: Seller checkbox enabled.", "DEBUG")
+        else:
+            self.log_message("rb_refi or chk_seller not found on main window for _handle_refi_selection.", "ERROR")
+
     def log_message(self, message, level="INFO"):
+        # Add "DEBUG" to recognized levels if you want to filter them differently later
+        if level == "DEBUG" and not os.getenv("APP_DEBUG_MODE"): # Example: only log DEBUG if env var is set
+            return
         timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
         formatted_message = f"[{timestamp}] [{level}] {message}"
         self.log_area.append(formatted_message)
