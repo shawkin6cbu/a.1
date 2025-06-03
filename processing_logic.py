@@ -312,6 +312,27 @@ def parse_any_legacy_contract_text(original_text_from_pdf: str) -> dict:
     
     return data
 
+def get_all_legacy_contract_field_names() -> list[str]:
+    """
+    Returns a comprehensive list of all possible field names (keys) that
+    the `parse_any_legacy_contract_text` function can extract and include
+    in its returned dictionary. This list is based on a review of the
+    keys assigned in that function.
+    """
+    # This list should be manually maintained and updated if
+    # `parse_any_legacy_contract_text` changes which keys it can return.
+    return [
+        "COUNTY", "SLR1ADR1", "SLR1ADR2", "AG701FRM", "AG701LIC", "AG701AD1",
+        "AG701AD2", "AG701PH", "INCITY", "INCOUNTY", "DEPHELD", "POSSION",
+        "UNDNAME", "SLR1NAM1", "SLR1REL1", "SLR1NAM2", "SLR1CELL1", "SLR1EMAIL",
+        "SLR1CELL2", "SLR1EMAIL2", "PARCELID", "PLISTINGAGENT", "MTDTTYPE",
+        "SALEPRIC", "DEPOSIT", "SETTDATE", "BYR1NAM1", "BYR1NAM2", "BYR1REL1",
+        "BYR1ADR1", "BYR1ADR2", "BYR1CELL1", "BYR1EMAIL", "BYR1CELL2", "BYR1EMAIL2",
+        "LORU", "LOTUNIT", "SUBDIVN", "PROPSTRE", "PROPCITY", "STATELET", "PROPZIP",
+        "AG701NAM", "AG701MO", "AG701EMAIL", "AG701CONTLIC", "AG702FRM", "AG702LIC",
+        "AG702AD1", "AG702AD2", "AG702PH", "AG702NAM", "AG702MO", "AG702EMAIL",
+        "AG702CONTLIC", "COMPCT"
+    ]
 
 def generate_legacy_folder_name(extracted_data: dict) -> str:
     """

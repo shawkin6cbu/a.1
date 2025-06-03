@@ -16,6 +16,7 @@ from processing_logic import check_folder_exists
 from processing_logic import get_initial_legacy_folder_name_and_data
 from processing_logic import handle_legacy_contract_processing
 from processing_logic import copy_pdf_to_folder
+from processing_logic import get_all_legacy_contract_field_names # Added import
 # Ensure os is imported for os.path.basename if used directly after these imports (it's used locally in methods)
 
 # Optional: Set a modern style
@@ -359,9 +360,22 @@ modern_stylesheet = r"""
         border: 1px solid #2d2e31; font-weight: bold;
     }
     QTableWidget::item {
-        padding: 5px; border-bottom: 1px solid #3c4043; border-right: 1px solid #3c4043;  
+        border-bottom: 1px solid #3c4043; border-right: 1px solid #3c4043;  
+        padding: 1px;
     }
-    QTableWidget::item:selected { background-color: #8ab4f8; color: #202124; }
+    QTableWidget::item:selected, QTableWidget::item:focus {
+        background-color: #8ab4f8;
+        color: #202124;
+    }
+    /* Make the editor widget fill the cell properly */
+    QTableWidget QLineEdit {
+        background-color: #2d2e31;
+        color: #e8eaed;
+        border: none;
+        margin: 0px;
+        padding: 1px;
+        font-size: 12pt;
+    }
 """
 
 
@@ -644,24 +658,34 @@ class ContractProcessorApp(QMainWindow):
         self.data_table.setHorizontalHeaderLabels(["Label", "Value"])
         self.data_table.horizontalHeader().setStretchLastSection(True)
         self.data_table.setAlternatingRowColors(True) # QSS can also control this via ::alternate
-        # self.data_table.setStyleSheet(...) # REMOVED - Handled by global QSS
+        
+        # Get all possible field names from processing_logic
+        all_field_names = get_all_legacy_contract_field_names()
+        
+        self.data_table.setRowCount(len(all_field_names))
+        
+        for row, label_text in enumerate(all_field_names):
+            label_item = QTableWidgetItem(label_text)
+            label_item.setFlags(label_item.flags() & ~Qt.ItemFlag.ItemIsEditable) # Make label not editable
+            
+            value_item = QTableWidgetItem("") # Empty value
+            # Value items are editable by default, no need to change flags unless explicitly making them non-editable
+            
+            self.data_table.setItem(row, 0, label_item)
+            self.data_table.setItem(row, 1, value_item)
+            
         layout.addWidget(self.data_table)
 
         buttons_layout = QHBoxLayout()
         buttons_layout.addStretch(1)
 
         self.btn_save_changes = QPushButton("Save Changes")
-        self.btn_save_changes.setEnabled(False)
-        self.btn_save_changes.setToolTip("Save any edited values in the table (Not Implemented).")
+        self.btn_save_changes.setEnabled(True) # Enable the button
+        self.btn_save_changes.setToolTip("Save the current table data to a .pxt file.")
+        self.btn_save_changes.clicked.connect(self._save_table_data_to_pxt) # Connect to new method
         # self.btn_save_changes.setStyleSheet(...) # REMOVED
 
-        self.btn_export_data = QPushButton("Export Data")
-        self.btn_export_data.setEnabled(False)
-        self.btn_export_data.setToolTip("Export the displayed data to a file (Not Implemented).")
-        # self.btn_export_data.setStyleSheet(...) # REMOVED
-
         buttons_layout.addWidget(self.btn_save_changes)
-        buttons_layout.addWidget(self.btn_export_data)
         layout.addLayout(buttons_layout)
 
     def _select_output_directory(self):
@@ -846,6 +870,61 @@ class ContractProcessorApp(QMainWindow):
         self.progress_bar.setVisible(False)
         self.status_label.setText("Processing finished.")
 
+    def _save_table_data_to_pxt(self):
+        """
+        Saves the current data from self.data_table to a '.pxt' file.
+        The file format is key: value, one pair per line, followed by an end marker.
+        """
+        if self.data_table.rowCount() == 0:
+            self.log_message("No data in table to save.", "WARNING")
+            QMessageBox.information(self, "No Data", "There is no data in the table to save.")
+            return
+
+        table_data = {}
+        for row in range(self.data_table.rowCount()):
+            label_item = self.data_table.item(row, 0)
+            value_item = self.data_table.item(row, 1)
+
+            if label_item and value_item: # Ensure items exist
+                label = label_item.text()
+                value = value_item.text()
+                table_data[label] = value
+            elif label_item: # If only label exists, store value as empty
+                table_data[label_item.text()] = ""
+            # If label_item is None, we skip this row as it's invalid for our format
+
+        if not table_data:
+            self.log_message("No valid data extracted from table to save.", "WARNING")
+            QMessageBox.warning(self, "No Data", "Could not extract valid data from the table.")
+            return
+
+        # Propose a filename like "PROJECT_NAME_overlay.pxt" or just "overlay.pxt"
+        # For now, keeping it simple with "overlay.pxt"
+        suggested_filename = "overlay.pxt"
+        
+        # Use QFileDialog to get the save file name
+        file_path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Save PXT File",
+            QDir.homePath() + "/" + suggested_filename, # Default path and filename
+            "PXT files (*.pxt);;All Files (*)"
+        )
+
+        if file_path:
+            try:
+                with open(file_path, 'w') as f:
+                    for key, value in table_data.items():
+                        f.write(f"{key}: {value}\n")
+                    f.write("---\n") # Using "---" as a simple end marker, similar to YAML/Markdown
+                    f.write("End of Extracted Data\n") # More descriptive end line
+                
+                self.log_message(f"Table data successfully saved to: {file_path}", "INFO")
+                QMessageBox.information(self, "Save Successful", f"Data saved to:\n{file_path}")
+            except Exception as e:
+                self.log_message(f"Error saving data to PXT file '{file_path}': {e}", "ERROR")
+                QMessageBox.warning(self, "Save Failed", f"Could not save data to file:\n{e}")
+        else:
+            self.log_message("Save operation cancelled by user.", "INFO")
 
     def update_extracted_data_viewer(self, data_dict_to_display):
         """
@@ -867,9 +946,14 @@ class ContractProcessorApp(QMainWindow):
             key_item = QTableWidgetItem(str(key))
             value_item = QTableWidgetItem(str(value) if value is not None else "") # Handle None values
 
-            # Make items non-editable for now, but selectable
+            # Set editability flags:
+            # "Label" column (key_item) should not be editable.
             key_item.setFlags(key_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            value_item.setFlags(value_item.flags() & ~Qt.ItemFlag.ItemIsEditable) 
+            # "Value" column (value_item) should be editable (which is the default state for QTableWidgetItem).
+            # No need to explicitly set ItemIsEditable for value_item if we ensure it's not cleared.
+            # If it might have been cleared elsewhere, or for explicit clarity:
+            # value_item.setFlags(value_item.flags() | Qt.ItemFlag.ItemIsEditable)
+            # For this case, simply not disabling it is sufficient.
 
             self.data_table.setItem(row, 0, key_item)
             self.data_table.setItem(row, 1, value_item)
