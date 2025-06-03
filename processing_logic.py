@@ -356,7 +356,7 @@ def generate_legacy_folder_name(extracted_data: dict) -> str:
                 first_name = ""
         first_name_safe = re.sub(r'[<>:"/\\|?*]', '', first_name)
         last_name_safe = re.sub(r'[<>:"/\\|?*]', '', last_name)
-        return f"{last_name_safe}, {first_name_safe}  25-" if first_name_safe else f"{last_name_safe}  25-"
+        return f"{last_name_safe}  25-"
     return "Unknown_Entity  25-"
 
 
@@ -445,7 +445,7 @@ def create_legacy_contract_folder_structure(final_folder_path: str, extracted_da
         entity_list_content = []
         if extracted_data: # Ensure extracted_data is not None
             for key, value in extracted_data.items():
-                entity_list_content.append(f"{key}: {value}")
+                entity_list_content.append(f"{key}= {value}")
         
         with open(os.path.join(final_folder_path, "overlay.pxt"), "w") as f:
             f.write("\n".join(entity_list_content))
