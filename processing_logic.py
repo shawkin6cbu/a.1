@@ -10,6 +10,7 @@ from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFParser
 import docx # Added for python-docx interaction
+from docxtpl import DocxTemplate # Added for docxtpl
 
 CONFIG_FILE_PATH = "config.py"
 
@@ -678,76 +679,52 @@ def update_label_index(current_index: int) -> None:
 
 def generate_label_docx(template_path: str, output_path: str, data: dict, label_index: int) -> bool:
     """
-    Generates a DOCX file from a template, replacing placeholders with data.
+    Generates a DOCX file from a template using docxtpl.
+    Placeholders in the template should be like {{Buyer1}}, {{Seller1}}, {{Address1}}, etc.
+    It populates the active label_index with data and clears other indexed placeholders.
 
     Args:
         template_path: Path to the DOCX template file.
         output_path: Path to save the generated DOCX file.
         data: Dictionary containing data to fill into placeholders.
-        label_index: Integer to identify specific placeholders (e.g., Buyer1, Seller1).
+               Keys like 'BYR1NAM1', 'SLR1NAM1', 'PROPSTRE' are used for the active label.
+        label_index: Integer (1-20) to identify which set of placeholders is active.
 
     Returns:
         True if generation was successful, False otherwise.
     """
     try:
-        if not os.path.exists(template_path):
-            print(f"ERROR: Template file not found at {template_path}")
-            return False
+        doc = DocxTemplate(template_path)
+        context = {}
 
-        # Copy template to output path to work on a copy
-        shutil.copy2(template_path, output_path)
+        for i in range(1, 21):  # Iterate from 1 to 20
+            buyer_key = f"Buyer{i}"
+            seller_key = f"Seller{i}"
+            address_key = f"Address{i}"
+
+            if i == label_index:
+                # Active label: populate with data
+                buyer_name_str = format_name(data.get('BYR1NAM1', ''), data.get('BYR1NAM2', ''))
+                seller_name_str = format_name(data.get('SLR1NAM1', ''), data.get('SLR1NAM2', ''))
+                address_str = data.get('PROPSTRE', '')
+                
+                context[buyer_key] = buyer_name_str
+                context[seller_key] = seller_name_str
+                context[address_key] = address_str
+            else:
+                # Inactive label: clear placeholders by setting them to empty strings
+                context[buyer_key] = ""
+                context[seller_key] = ""
+                context[address_key] = ""
         
-        doc = docx.Document(output_path)
-
-        buyer_tag = f"Buyer{label_index}"
-        seller_tag = f"Seller{label_index}"
-        address_tag = f"Address{label_index}"
-
-        # Retrieve and format data
-        # format_name is assumed to be in the same module (processing_logic.py)
-        buyer_name = format_name(data.get('BYR1NAM1'), data.get('BYR1NAM2'))
-        seller_name = format_name(data.get('SLR1NAM1'), data.get('SLR1NAM2'))
-        address = data.get('PROPSTRE', '') # Default to empty string if not found
-
-        # New replacement logic targeting hidden runs
-        for paragraph in doc.paragraphs:
-            for run in paragraph.runs:
-                if run.font.hidden:
-                    current_run_text = run.text.strip() # Strip to handle potential spaces around placeholder
-                    if current_run_text == buyer_tag:
-                        run.text = buyer_name
-                        run.font.hidden = False
-                    elif current_run_text == seller_tag:
-                        run.text = seller_name
-                        run.font.hidden = False
-                    elif current_run_text == address_tag:
-                        run.text = address
-                        run.font.hidden = False
-        
-        for table in doc.tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    for paragraph in cell.paragraphs:
-                        for run in paragraph.runs:
-                            if run.font.hidden:
-                                current_run_text = run.text.strip() # Strip to handle potential spaces
-                                if current_run_text == buyer_tag:
-                                    run.text = buyer_name
-                                    run.font.hidden = False
-                                elif current_run_text == seller_tag:
-                                    run.text = seller_name
-                                    run.font.hidden = False
-                                elif current_run_text == address_tag:
-                                    run.text = address
-                                    run.font.hidden = False
-        
+        doc.render(context)
         doc.save(output_path)
-        print(f"Successfully generated label document: {output_path}")
+        print(f"Successfully generated label document using docxtpl: {output_path}")
         return True
 
-    except FileNotFoundError: # Specifically for shutil.copy2 if template_path is somehow re-checked or output_path dir invalid
-        print(f"ERROR: File not found during copy. Template: {template_path}, Output: {output_path}")
+    except FileNotFoundError:
+        print(f"ERROR: Template file not found at {template_path} for docxtpl.")
         return False
     except Exception as e:
-        print(f"ERROR: An unexpected error occurred while generating DOCX {output_path}: {e}")
+        print(f"ERROR: An unexpected error occurred with docxtpl for {output_path}: {e}")
         return False

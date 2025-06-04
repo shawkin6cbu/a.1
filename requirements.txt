@@ -2,4 +2,4 @@ PyQt6
 python-docx
 pdfminer.six
 pywin32
-
+docxtpl
