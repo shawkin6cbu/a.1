@@ -7,4 +7,4 @@ This project processes contracts based on PDF inputs.
 - Install dependencies: `pip install -r requirements.txt`
 
 ## Usage
-Run the application with: `python main_gui.py`
+Run the application with: `python main.py`
