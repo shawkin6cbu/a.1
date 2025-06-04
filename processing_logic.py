@@ -9,8 +9,9 @@ from pdfminer.pdfdocument import PDFDocument
 from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFParser
+import docx # Added for python-docx interaction
 
-
+CONFIG_FILE_PATH = "config.py"
 
 def extract_text_from_pdf(pdf_path):
     """
@@ -334,6 +335,74 @@ def get_all_legacy_contract_field_names() -> list[str]:
         "AG702CONTLIC", "COMPCT"
     ]
 
+def format_name(name1_str, name2_str=None):
+    """
+    Formats one or two names into a standardized string.
+    Handles company names and individual names with different formats.
+    """
+    COMPANY_KEYWORDS = ["home", "prop", "llc", "inc", "custom", "build", "dev"]
+
+    if any(keyword in name1_str.lower() for keyword in COMPANY_KEYWORDS if keyword): # ensure keyword is not empty
+        return name1_str.upper()
+
+    def _parse_name(name_str):
+        if not name_str or not name_str.strip():
+            return None, None
+        
+        name_str = name_str.strip()
+        
+        if ',' in name_str:
+            parts = name_str.split(',', 1)
+            last = parts[0].strip()
+            first = parts[1].strip() if len(parts) > 1 else None
+            return first, last
+        else:
+            parts = name_str.split()
+            if not parts: # Should be caught by initial strip and check, but as safeguard
+                return None, None
+            if len(parts) == 1:
+                return None, parts[0].strip() # Treat as last name
+            else:
+                last = parts[-1].strip()
+                first = " ".join(parts[:-1]).strip()
+                return first, last
+
+    first1, last1 = _parse_name(name1_str)
+
+    if not last1: # If name1_str was empty or unparseable to a last name
+        return "" # Or a sensible default like "UNKNOWN NAME"
+
+    if not name2_str or not name2_str.strip():
+        # Only name1 is provided or name2 is empty
+        if first1:
+            return f"{last1.upper()}, {first1}"
+        else:
+            return last1.upper()
+
+    first2, last2 = _parse_name(name2_str)
+
+    if not last2: # If name2_str was empty or unparseable to a last name
+        # Treat as if name2_str was not provided
+        if first1:
+            return f"{last1.upper()}, {first1}"
+        else:
+            return last1.upper()
+
+    # Both names are provided and parseable
+    if last1.upper() == last2.upper():
+        return f"{last1.upper()}, {first1} & {first2}"
+    else:
+        # Ensure first names are not None before joining
+        f1 = first1 if first1 else ""
+        f2 = first2 if first2 else ""
+        # Construct combined first names, handling cases where one or both might be empty
+        combined_first_names = f"{f1} {f2}".strip() 
+        if combined_first_names:
+             return f"{last1.upper()} & {last2.upper()}, {combined_first_names}"
+        else: # Both first names were None or empty
+             return f"{last1.upper()} & {last2.upper()}"
+
+
 def generate_legacy_folder_name(extracted_data: dict) -> str:
     """
     Generates a standardized folder name for a Legacy contract based on extracted data,
@@ -453,25 +522,42 @@ def create_legacy_contract_folder_structure(final_folder_path: str, extracted_da
 
         # Placeholder files
         # Use final_folder_path's basename for user-facing messages/content if needed
-        folder_basename = os.path.basename(final_folder_path)
+        # folder_basename = os.path.basename(final_folder_path) # No longer directly used for simple label
         
         # Create subfolders first (ensure "Setup" exists before writing files into it)
         setup_subfolder_path = os.path.join(final_folder_path, "Setup")
         os.makedirs(setup_subfolder_path, exist_ok=True)
         os.makedirs(os.path.join(final_folder_path, "TitleSearch"), exist_ok=True)
 
-        # Place files into the "Setup" subfolder
-        file_label_path = os.path.join(setup_subfolder_path, "file label.docx")
-        with open(file_label_path, "w") as f:
-            f.write(f"File Label for: {folder_basename}\n")
-            if extracted_data:
-                f.write(f"Property Address: {extracted_data.get('PROPSTRE', 'N/A')}\n")
+        # Remove old placeholder label creation in "Setup"
+        # file_label_path = os.path.join(setup_subfolder_path, "file label.docx")
+        # with open(file_label_path, "w") as f:
+        #     f.write(f"File Label for: {folder_basename}\n")
+        #     if extracted_data:
+        #         f.write(f"Property Address: {extracted_data.get('PROPSTRE', 'N/A')}\n")
         
+        # Create setupdocs.docx in "Setup" subfolder
         setup_docs_path = os.path.join(setup_subfolder_path, "setupdocs.docx")
         with open(setup_docs_path, "w") as f:
-            f.write(f"Setup Documents for: {folder_basename}\n")
+            f.write(f"Setup Documents for: {os.path.basename(final_folder_path)}\n") # Use basename here
 
-        print(f"SUCCESS: Created folder structure in '{final_folder_path}' with documents in 'Setup' subfolder.")
+        # Generate the new Label.docx in the "Setup" subfolder
+        template_label_path = "templates/Label.docx" # Assuming this path is correct relative to execution
+        # Ensure setup_subfolder_path is defined before this line (it is, a few lines above)
+        output_label_path = os.path.join(setup_subfolder_path, "Label.docx")
+        
+        if extracted_data: # Ensure there's data for the label
+            label_index = get_next_label_index()
+            label_generated = generate_label_docx(template_label_path, output_label_path, extracted_data, label_index)
+            if label_generated:
+                update_label_index(label_index)
+                print(f"INFO: Successfully generated and updated label index for {output_label_path}")
+            else:
+                print(f"WARNING: Failed to generate label for {output_label_path}")
+        else:
+            print(f"WARNING: No extracted_data available, skipping label generation for {final_folder_path}")
+
+        print(f"SUCCESS: Created folder structure in '{final_folder_path}'.")
         return final_folder_path, True # Return path and success
     except OSError as e:
         print(f"ERROR: Could not create folder structure in '{final_folder_path}'. Error: {e}")
@@ -530,3 +616,138 @@ def handle_legacy_contract_processing(
         return created_path, f"Successfully created folder structure in '{processed_folder_name}'"
     else:
         return None, f"Failed to create folder structure for '{processed_folder_name}'"
+
+
+def get_next_label_index() -> int:
+    """
+    Reads the next_label_index from config.py.
+    Defaults to 1 if config.py or the specific line is not found or parsing fails.
+    """
+    try:
+        if not os.path.exists(CONFIG_FILE_PATH):
+            print(f"Warning: {CONFIG_FILE_PATH} not found. Defaulting to index 1.")
+            return 1
+        with open(CONFIG_FILE_PATH, 'r') as f:
+            for line in f:
+                if line.startswith("next_label_index ="):
+                    try:
+                        index = int(line.split('=')[1].strip())
+                        return index
+                    except (ValueError, IndexError) as e:
+                        print(f"Warning: Error parsing next_label_index in {CONFIG_FILE_PATH}: {e}. Defaulting to 1.")
+                        return 1
+        print(f"Warning: 'next_label_index =' line not found in {CONFIG_FILE_PATH}. Defaulting to index 1.")
+        return 1
+    except IOError as e:
+        print(f"Warning: Could not read {CONFIG_FILE_PATH}: {e}. Defaulting to index 1.")
+        return 1
+
+def update_label_index(current_index: int) -> None:
+    """
+    Updates the next_label_index in config.py.
+    If current_index is 20, new_index becomes 1. Otherwise, new_index is current_index + 1.
+    Creates config.py if it doesn't exist.
+    """
+    new_index = 1 if current_index == 20 else current_index + 1
+    
+    lines = []
+    found = False
+    
+    try:
+        if os.path.exists(CONFIG_FILE_PATH):
+            with open(CONFIG_FILE_PATH, 'r') as f:
+                lines = f.readlines()
+        
+        new_lines = []
+        for line in lines:
+            if line.startswith("next_label_index ="):
+                new_lines.append(f"next_label_index = {new_index}\n")
+                found = True
+            else:
+                new_lines.append(line)
+        
+        if not found:
+            new_lines.append(f"next_label_index = {new_index}\n")
+            
+        with open(CONFIG_FILE_PATH, 'w') as f:
+            f.writelines(new_lines)
+            
+    except IOError as e:
+        print(f"Error: Could not write to {CONFIG_FILE_PATH}: {e}")
+# Ensure newline at EOF
+
+def generate_label_docx(template_path: str, output_path: str, data: dict, label_index: int) -> bool:
+    """
+    Generates a DOCX file from a template, replacing placeholders with data.
+
+    Args:
+        template_path: Path to the DOCX template file.
+        output_path: Path to save the generated DOCX file.
+        data: Dictionary containing data to fill into placeholders.
+        label_index: Integer to identify specific placeholders (e.g., Buyer1, Seller1).
+
+    Returns:
+        True if generation was successful, False otherwise.
+    """
+    try:
+        if not os.path.exists(template_path):
+            print(f"ERROR: Template file not found at {template_path}")
+            return False
+
+        # Copy template to output path to work on a copy
+        shutil.copy2(template_path, output_path)
+        
+        doc = docx.Document(output_path)
+
+        buyer_tag = f"Buyer{label_index}"
+        seller_tag = f"Seller{label_index}"
+        address_tag = f"Address{label_index}"
+
+        # Retrieve and format data
+        # format_name is assumed to be in the same module (processing_logic.py)
+        buyer_name = format_name(data.get('BYR1NAM1'), data.get('BYR1NAM2'))
+        seller_name = format_name(data.get('SLR1NAM1'), data.get('SLR1NAM2'))
+        address = data.get('PROPSTRE', '') # Default to empty string if not found
+
+        # New replacement logic targeting hidden runs
+        for paragraph in doc.paragraphs:
+            for run in paragraph.runs:
+                if run.font.hidden:
+                    current_run_text = run.text.strip() # Strip to handle potential spaces around placeholder
+                    if current_run_text == buyer_tag:
+                        run.text = buyer_name
+                        run.font.hidden = False
+                    elif current_run_text == seller_tag:
+                        run.text = seller_name
+                        run.font.hidden = False
+                    elif current_run_text == address_tag:
+                        run.text = address
+                        run.font.hidden = False
+        
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            if run.font.hidden:
+                                current_run_text = run.text.strip() # Strip to handle potential spaces
+                                if current_run_text == buyer_tag:
+                                    run.text = buyer_name
+                                    run.font.hidden = False
+                                elif current_run_text == seller_tag:
+                                    run.text = seller_name
+                                    run.font.hidden = False
+                                elif current_run_text == address_tag:
+                                    run.text = address
+                                    run.font.hidden = False
+        
+        doc.save(output_path)
+        print(f"Successfully generated label document: {output_path}")
+        return True
+
+    except FileNotFoundError: # Specifically for shutil.copy2 if template_path is somehow re-checked or output_path dir invalid
+        print(f"ERROR: File not found during copy. Template: {template_path}, Output: {output_path}")
+        return False
+    except Exception as e:
+        print(f"ERROR: An unexpected error occurred while generating DOCX {output_path}: {e}")
+        return False
