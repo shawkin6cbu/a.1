@@ -484,7 +484,7 @@ def get_initial_legacy_folder_name_and_data(pdf_file_path: str) -> tuple[str | N
         return None, None, error_msg
 
 
-def create_legacy_contract_folder_structure(final_folder_path: str, extracted_data: dict) -> tuple[str, bool]:
+def create_legacy_contract_folder_structure(final_folder_path: str, extracted_data: dict, is_buyer_checked: bool, is_seller_checked: bool) -> tuple[str, bool]:
     """
     Creates the specific folder structure for a Legacy contract at the `final_folder_path`.
     This includes:
@@ -539,8 +539,72 @@ def create_legacy_contract_folder_structure(final_folder_path: str, extracted_da
         
         # Create setupdocs.docx in "Setup" subfolder
         setup_docs_path = os.path.join(setup_subfolder_path, "setupdocs.docx")
-        with open(setup_docs_path, "w") as f:
-            f.write(f"Setup Documents for: {os.path.basename(final_folder_path)}\n") # Use basename here
+
+        if is_buyer_checked and is_seller_checked:
+            print(f"INFO: Both buyer and seller checked. Merging and templating setupdocs.docx for {final_folder_path}")
+            source_doc1_path = "templates/long/Order Summary-Res.docx"
+            source_doc2_path = "templates/green/buyer_seller.docx"
+            
+            try:
+                # --- Merge Documents ---
+                merged_document = docx.Document()
+
+                # Add content from the first document
+                if os.path.exists(source_doc1_path):
+                    doc1 = docx.Document(source_doc1_path)
+                    for element in doc1.element.body: # Iterate over top-level elements in body
+                        merged_document.element.body.append(element)
+                else:
+                    print(f"ERROR: Template {source_doc1_path} not found for merging.")
+                    # Create a simple placeholder if critical templates are missing
+                    with open(setup_docs_path, "w") as f:
+                        f.write(f"Setup Documents for: {os.path.basename(final_folder_path)}\nError: Template '{os.path.basename(source_doc1_path)}' not found.\n")
+                    # Optionally, re-raise or return False earlier if this is a critical failure
+                    # For now, this specific error will result in a placeholder and then processing continues to Label.docx
+                    # raise FileNotFoundError(f"Template {source_doc1_path} not found, created placeholder.") 
+                
+                # Add content from the second document only if the first one was found and processed
+                if os.path.exists(source_doc1_path) and os.path.exists(source_doc2_path):
+                    doc2 = docx.Document(source_doc2_path)
+                    for element in doc2.element.body: # Iterate over top-level elements in body
+                        merged_document.element.body.append(element)
+                    merged_document.save(setup_docs_path)
+                    print(f"INFO: Successfully merged documents into {setup_docs_path}")
+
+                    # --- Template Processing on Merged Document ---
+                    doc_tpl = DocxTemplate(setup_docs_path)
+                    pxt_file_path = os.path.join(final_folder_path, "overlay.pxt")
+                    context = parse_pxt_to_dict(pxt_file_path) 
+
+                    byr1nam1 = extracted_data.get('BYR1NAM1', '') if extracted_data else ''
+                    byr1nam2 = extracted_data.get('BYR1NAM2', '') if extracted_data else ''
+                    slr1nam1 = extracted_data.get('SLR1NAM1', '') if extracted_data else '' # Sourced from extracted_data
+                    slr1nam2 = extracted_data.get('SLR1NAM2', '') if extracted_data else '' # Sourced from extracted_data
+
+                    context['BYRREL'] = format_name(byr1nam1, byr1nam2)
+                    context['SLRREL'] = format_name(slr1nam1, slr1nam2)
+                    
+                    doc_tpl.render(context)
+                    doc_tpl.save(setup_docs_path) 
+                    print(f"INFO: Successfully templated {setup_docs_path}")
+
+                elif os.path.exists(source_doc1_path) and not os.path.exists(source_doc2_path):
+                    # First template existed, second didn't. Save what we have from first doc.
+                    print(f"ERROR: Template {source_doc2_path} not found for merging. Saving content from first template only.")
+                    merged_document.save(setup_docs_path) # Save the first document's content
+                    # Then write a modified placeholder or log error for the user that only partial content exists.
+                    # For simplicity, we'll just save doc1 content. User will see it's not the full merge.
+
+            except Exception as e: # Catch other potential errors during merge/template (docx, docxtpl errors)
+                print(f"ERROR: Failed to merge or template setupdocs.docx for {final_folder_path}: {e}")
+                # Fallback to simple placeholder in case of other errors if setup_docs_path wasn't already handled
+                if not (os.path.exists(setup_docs_path) and os.path.getsize(setup_docs_path) > 0) : # check if a placeholder was already made
+                    with open(setup_docs_path, "w") as f:
+                        f.write(f"Setup Documents for: {os.path.basename(final_folder_path)}\nError during generation: {e}\n")
+        else:
+            print(f"INFO: Buyer and Seller not both checked. Creating placeholder setupdocs.docx for {final_folder_path}")
+            with open(setup_docs_path, "w") as f:
+                f.write(f"Setup Documents for: {os.path.basename(final_folder_path)}\n")
 
         # Generate the new Label.docx in the "Setup" subfolder
         template_label_path = "templates/Label.docx" # Assuming this path is correct relative to execution
@@ -566,10 +630,12 @@ def create_legacy_contract_folder_structure(final_folder_path: str, extracted_da
 
 
 def handle_legacy_contract_processing(
-    pdf_file_paths, # Though we might only use the first one if GUI passes one by one
+    pdf_file_paths, 
     user_selected_output_dir: str, 
-    processed_folder_name: str, # This is the name decided by GUI (original or renamed)
-    extracted_data_from_gui: dict # This is the data from get_initial_legacy_folder_name_and_data
+    processed_folder_name: str, 
+    extracted_data_from_gui: dict,
+    is_buyer_checked: bool, # New argument
+    is_seller_checked: bool  # New argument
     ):
     """
     Main handler for the core logic of processing "Legacy" contracts.
@@ -609,7 +675,9 @@ def handle_legacy_contract_processing(
     # Delegate the actual folder and file creation
     created_path, success = create_legacy_contract_folder_structure(
         final_folder_path, 
-        extracted_data_from_gui
+        extracted_data_from_gui,
+        is_buyer_checked, # Pass down
+        is_seller_checked # Pass down
     )
 
     if success:
@@ -728,3 +796,22 @@ def generate_label_docx(template_path: str, output_path: str, data: dict, label_
     except Exception as e:
         print(f"ERROR: An unexpected error occurred with docxtpl for {output_path}: {e}")
         return False
+
+# Helper function to parse PXT file
+def parse_pxt_to_dict(pxt_file_path):
+    data = {}
+    if not os.path.exists(pxt_file_path):
+        print(f"Warning: PXT file not found at {pxt_file_path}")
+        return data
+    try:
+        with open(pxt_file_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("---"):
+                    continue
+                if '=' in line: 
+                    key, value = line.split('=', 1)
+                    data[key.strip()] = value.strip()
+    except Exception as e:
+        print(f"Error parsing PXT file {pxt_file_path}: {e}")
+    return data
