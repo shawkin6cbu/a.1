@@ -13,11 +13,11 @@ from PyQt6.QtCore import Qt, pyqtSignal, QDir, QTimer, QDateTime, QAbstractItemM
 from PyQt6.QtGui import QAction, QPalette, QColor
 
 # --- Import functions from processing_logic.py ---
-from processing_logic import check_folder_exists
-from processing_logic import get_initial_legacy_folder_name_and_data
-from processing_logic import handle_legacy_contract_processing
-from processing_logic import copy_pdf_to_folder
-from processing_logic import get_all_legacy_contract_field_names
+from core.processing_logic import check_folder_exists
+from core.processing_logic import get_initial_legacy_folder_name_and_data
+from core.processing_logic import handle_legacy_contract_processing
+from core.processing_logic import copy_pdf_to_folder
+from core.processing_logic import get_all_legacy_contract_field_names
 
 # --- Import custom GUI components ---
 from gui.widgets import CustomComboBox, PDFListWidget # Ensure correct relative import
@@ -27,8 +27,9 @@ from gui.tabs.data_viewer_tab import create_data_viewer_tab
 
 class ContractProcessorApp(QMainWindow):
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, config, parent=None): # Added config parameter
+        super().__init__(parent) # Pass parent if using one
+        self.config = config # Store the config
         self.setWindowTitle("Contract Processing Application")
         self.setGeometry(100, 100, 900, 700)
 
@@ -178,8 +179,13 @@ class ContractProcessorApp(QMainWindow):
             return
         self.log_message(f"Calling core processing for folder: {final_folder_name_for_processing}", "INFO")
         created_path, message = handle_legacy_contract_processing(
-            [single_pdf_file], output_dir, final_folder_name_for_processing, extracted_data,
-            is_buyer_checked, is_seller_checked
+            pdf_file_paths=[single_pdf_file],
+            user_selected_output_dir=output_dir,
+            processed_folder_name=final_folder_name_for_processing,
+            extracted_data_from_gui=extracted_data,
+            is_buyer_checked=is_buyer_checked,
+            is_seller_checked=is_seller_checked,
+            config=self.config # Pass the config
         )
         if created_path:
             self.log_message(f"SUCCESS (Legacy Folder Structure): {message}", "INFO")

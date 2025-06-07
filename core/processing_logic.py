@@ -1,6 +1,7 @@
 import re
 import os
 import shutil # Import shutil
+import yaml # For saving config
 from io import StringIO
 from datetime import datetime
 from pdfminer.converter import TextConverter
@@ -12,7 +13,7 @@ from pdfminer.pdfparser import PDFParser
 import docx # Added for python-docx interaction
 from docxtpl import DocxTemplate # Added for docxtpl
 
-CONFIG_FILE_PATH = "config.py"
+# CONFIG_FILE_PATH = "config.py" # Removed, config handled by AppController
 
 def extract_text_from_pdf(pdf_path):
     """
@@ -484,7 +485,18 @@ def get_initial_legacy_folder_name_and_data(pdf_file_path: str) -> tuple[str | N
         return None, None, error_msg
 
 
-def create_legacy_contract_folder_structure(final_folder_path: str, extracted_data: dict, is_buyer_checked: bool, is_seller_checked: bool) -> tuple[str, bool]:
+def save_config(config_data: dict, filepath="config.YAML"):
+    """Saves the configuration dictionary to a YAML file."""
+    try:
+        with open(filepath, 'w') as f:
+            yaml.dump(config_data, f, sort_keys=False)
+        print(f"INFO: Configuration successfully saved to {filepath}")
+        return True
+    except Exception as e:
+        print(f"ERROR: Could not save configuration to {filepath}: {e}")
+        return False
+
+def create_legacy_contract_folder_structure(final_folder_path: str, extracted_data: dict, is_buyer_checked: bool, is_seller_checked: bool, config: dict) -> tuple[str, bool]:
     """
     Creates the specific folder structure for a Legacy contract at the `final_folder_path`.
     This includes:
@@ -612,10 +624,10 @@ def create_legacy_contract_folder_structure(final_folder_path: str, extracted_da
         output_label_path = os.path.join(setup_subfolder_path, "Label.docx")
         
         if extracted_data: # Ensure there's data for the label
-            label_index = get_next_label_index()
+            label_index = get_next_label_index(config) # Pass config
             label_generated = generate_label_docx(template_label_path, output_label_path, extracted_data, label_index)
             if label_generated:
-                update_label_index(label_index)
+                update_label_index(config, label_index) # Pass config
                 print(f"INFO: Successfully generated and updated label index for {output_label_path}")
             else:
                 print(f"WARNING: Failed to generate label for {output_label_path}")
@@ -634,8 +646,9 @@ def handle_legacy_contract_processing(
     user_selected_output_dir: str, 
     processed_folder_name: str, 
     extracted_data_from_gui: dict,
-    is_buyer_checked: bool, # New argument
-    is_seller_checked: bool  # New argument
+    is_buyer_checked: bool,
+    is_seller_checked: bool,
+    config: dict # Added config
     ):
     """
     Main handler for the core logic of processing "Legacy" contracts.
@@ -676,8 +689,9 @@ def handle_legacy_contract_processing(
     created_path, success = create_legacy_contract_folder_structure(
         final_folder_path, 
         extracted_data_from_gui,
-        is_buyer_checked, # Pass down
-        is_seller_checked # Pass down
+        is_buyer_checked,
+        is_seller_checked,
+        config=config # Pass config
     )
 
     if success:
@@ -687,63 +701,31 @@ def handle_legacy_contract_processing(
         return None, f"Failed to create folder structure for '{processed_folder_name}'"
 
 
-def get_next_label_index() -> int:
+def get_next_label_index(config: dict) -> int:
     """
-    Reads the next_label_index from config.py.
-    Defaults to 1 if config.py or the specific line is not found or parsing fails.
+    Reads the next_label_index from the provided config dictionary.
+    Defaults to 1 if not found or parsing fails.
     """
     try:
-        if not os.path.exists(CONFIG_FILE_PATH):
-            print(f"Warning: {CONFIG_FILE_PATH} not found. Defaulting to index 1.")
-            return 1
-        with open(CONFIG_FILE_PATH, 'r') as f:
-            for line in f:
-                if line.startswith("next_label_index ="):
-                    try:
-                        index = int(line.split('=')[1].strip())
-                        return index
-                    except (ValueError, IndexError) as e:
-                        print(f"Warning: Error parsing next_label_index in {CONFIG_FILE_PATH}: {e}. Defaulting to 1.")
-                        return 1
-        print(f"Warning: 'next_label_index =' line not found in {CONFIG_FILE_PATH}. Defaulting to index 1.")
-        return 1
-    except IOError as e:
-        print(f"Warning: Could not read {CONFIG_FILE_PATH}: {e}. Defaulting to index 1.")
+        index = int(config.get('next_label_index', 1))
+        return index
+    except (ValueError, TypeError): # Catch if value is not int or None
+        print(f"Warning: Error parsing next_label_index from config. Using default 1.")
         return 1
 
-def update_label_index(current_index: int) -> None:
+def update_label_index(config: dict, current_index: int) -> None:
     """
-    Updates the next_label_index in config.py.
+    Updates the next_label_index in the config dictionary and saves the config.
     If current_index is 20, new_index becomes 1. Otherwise, new_index is current_index + 1.
-    Creates config.py if it doesn't exist.
     """
     new_index = 1 if current_index == 20 else current_index + 1
-    
-    lines = []
-    found = False
-    
-    try:
-        if os.path.exists(CONFIG_FILE_PATH):
-            with open(CONFIG_FILE_PATH, 'r') as f:
-                lines = f.readlines()
-        
-        new_lines = []
-        for line in lines:
-            if line.startswith("next_label_index ="):
-                new_lines.append(f"next_label_index = {new_index}\n")
-                found = True
-            else:
-                new_lines.append(line)
-        
-        if not found:
-            new_lines.append(f"next_label_index = {new_index}\n")
-            
-        with open(CONFIG_FILE_PATH, 'w') as f:
-            f.writelines(new_lines)
-            
-    except IOError as e:
-        print(f"Error: Could not write to {CONFIG_FILE_PATH}: {e}")
-# Ensure newline at EOF
+    config['next_label_index'] = new_index
+    if not save_config(config): # save_config now part of this module
+        print(f"ERROR: Failed to save updated label index to config file.")
+    else:
+        print(f"INFO: Successfully updated label index to {new_index} in config.")
+
+# Ensure newline at EOF (already present from previous code)
 
 def generate_label_docx(template_path: str, output_path: str, data: dict, label_index: int) -> bool:
     """

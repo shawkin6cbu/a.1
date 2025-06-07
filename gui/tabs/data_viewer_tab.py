@@ -6,7 +6,7 @@ from PyQt6.QtCore import Qt
 # Other imports like QFileDialog, QMessageBox etc. are handled by main_window_instance methods.
 
 # --- Import functions from processing_logic.py ---
-from processing_logic import get_all_legacy_contract_field_names # Added import
+from core.processing_logic import get_all_legacy_contract_field_names # Added import
 
 
 def create_data_viewer_tab(main_window_instance):
