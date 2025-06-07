@@ -3,3 +3,4 @@ python-docx
 pdfminer.six
 pywin32
 docxtpl
+PyYAML>=5.0
