@@ -300,11 +300,14 @@ class ContractProcessorApp(QMainWindow):
         )
 
     def _toggle_setup_docs_options(self, checked: bool):
-        if hasattr(self, 'setup_docs_options_group'):
-            self.setup_docs_options_group.setVisible(checked)
-            self.log_message(f"Setup Docs Options visibility toggled to: {checked}", "DEBUG")
+        # This method now toggles the visibility of the container widget
+        # that holds all the expanding options.
+        
+        if hasattr(self, 'setup_docs_options_container'):
+            self.setup_docs_options_container.setVisible(checked)
+            self.log_message(f"Setup Docs Options container visibility toggled to: {checked}", "DEBUG")
         else:
-            self.log_message("setup_docs_options_group not found on main window.", "ERROR")
+            self.log_message("setup_docs_options_container not found on main window.", "ERROR")
 
     # --- Radio Button and Checkbox Logic ---
     def _update_seller_checkbox_based_on_refi(self):

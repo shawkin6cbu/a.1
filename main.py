@@ -28,6 +28,6 @@ if __name__ == '__main__':
     #         #     QMessageBox.warning(None, "Setup Issue", f"Could not create all standard directories.")
     #         pass # Placeholder if create_standard_dirs is not yet implemented/imported
 
-    main_window = ContractProcessorApp()
+    main_window = ContractProcessorApp()    
     main_window.show()
     sys.exit(app.exec())
