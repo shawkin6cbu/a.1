@@ -23,3 +23,16 @@ Output_SetupDocs/*
 *.tmp
 *.bak
 *.swp
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Temporary Office files (e.g., Word lock files)
+~$*.docx
+~$*.xlsx
+~$*.pptx
+~$Label.docx # Specific instance observed
+
+# Configuration file - uncomment if it contains sensitive information
+# config.YAML
